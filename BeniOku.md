@@ -32,7 +32,7 @@ FEC kullanan ve kullanmayan sistemlerin Bit Hata Oranı  performans kıyaslamala
 
 
 
-\[ Veri Kaynağı (Sensörler) ] 
+\[ Veri Kaynağı (Sensörler) ]
 
 &#x20;      │
 
@@ -106,37 +106,31 @@ Projeyi yerel bilgisayarında çalıştırmak için aşağıdaki adımları izle
 
 
 
-1-)Repoyu klonla:
+1-) Repoyu klonla:
 
 
-
-Bash
 
 git clone https://github.com/metinpekmezoglu/FEC\_Forward\_Error\_Correction.git
 
-cd REPO\_ADIN
+
+
+cd FEC\_Forward\_Error\_Correction
 
 
 
-2-)Gerekli kütüphaneleri yükle:
+2-) Gerekli kütüphaneleri yükle:
 
 
-
-Bash
 
 pip install -r requirements.txt
 
 
 
-3-)Simülasyonu çalıştır:
+3-) Simülasyonu çalıştır:
 
 
-
-Bash
 
 python main.py
-
-
 
 
 
@@ -144,13 +138,11 @@ python main.py
 
 
 
-**\*\*Metin Pekmezoğlu\*\***  
+**\*\*Metin Pekmezoğlu\*\***
 
-**\* Elektrik-Elektronik Mühendisliği** 
+**\* Elektrik-Elektronik Mühendisliği**
 
-**\* \[GitHub Profilim](https://github.com/metinpekmezoglu)** 
+**\* \[GitHub Profilim](https://github.com/metinpekmezoglu)**
 
 **\* \[LinkedIn Profilim](https://www.linkedin.com/in/metin-pekmezo%C4%9Flu-44baba259/)**
-
-
 
