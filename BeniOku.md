@@ -110,7 +110,7 @@ Projeyi yerel bilgisayarında çalıştırmak için aşağıdaki adımları izle
 
 
 
-git clone https://github.com/metinpekmezoglu/FEC\_Forward\_Error\_Correction.git
+git clone https://github.com/metinpekmezoglu/FEC\_Forward\_Error\_Correction
 
 
 
@@ -138,7 +138,7 @@ python main.py
 
 
 
-**\*\*Metin Pekmezoğlu\*\***
+**Metin Pekmezoğlu**
 
 **\* Elektrik-Elektronik Mühendisliği**
 
