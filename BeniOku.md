@@ -90,7 +90,7 @@ FEC kullanan ve kullanmayan sistemlerin Bit Hata Oranı  performans kıyaslamala
 
 ├── requirements.txt       # Gerekli kütüphaneler
 
-└── README.md              # Proje dokümantasyonu
+└── BeniOku.md              # Proje dokümantasyonu
 
 
 
@@ -110,7 +110,7 @@ Projeyi yerel bilgisayarında çalıştırmak için aşağıdaki adımları izle
 
 
 
-git clone https://github.com/metinpekmezoglu/FEC\_Forward\_Error\_Correction
+git clone https://github.com/metinpekmezoglu/FEC\_Forward\_Error\_Correction.git
 
 
 
