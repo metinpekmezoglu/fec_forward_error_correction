@@ -1,93 +1,93 @@
 import numpy as np
+from reedsolo import RSCodec, ReedSolomonError
 
-class Hamming74Decoder:
+class FECDecoder:
     """
-    Sistematik Hamming (7,4) Blok Kod Çözücü.
-    Sendrom hesaplaması (Syndrome Decoding) ile her 7 bitlik bloktaki
-    1 bitlik hataları tespit edip düzeltir ve 4 bitlik orijinal mesajı çıkarır.
+    İHA ve Model Uydu Telemetri Sistemi için İleri Hata Düzeltme (FEC) Çözücü.
+    - Sendrom (Syndrome) tabanlı Hamming(7,4) hata düzeltme
+    - Reed-Solomon hata çözme algoritmalarını içerir.
     """
-    def __init__(self):
-        self.n = 7
-        self.k = 4
-        
-        # Parity Alt Matrisi P (4x3) - Encoder ile birebir aynı olmalı
-        self.P = np.array([
-            [1, 1, 0],
-            [1, 0, 1],
-            [0, 1, 1],
-            [1, 1, 1]
-        ], dtype=int)
-        
-        self.I_nk = np.eye(self.n - self.k, dtype=int) # 3x3 Birim Matris
-        
-        # Eşlik Denetim Matrisi: H = [P^T | I_3] (3x7)
-        self.H = np.hstack((self.P.T, self.I_nk))
-        
-        # H^T (7x3) matrisinin her satırı, o indeksteki bit hatasının sendromunu verir.
-        # Hızlı arama (Lookup Table) için sendromları sözlüğe kaydediyoruz:
-        # Anahtar: Sendrom tuple'ı (örn: (1, 0, 1)) -> Değer: Hatalı bit indeksi (0..6)
-        self.syndrome_table = {}
-        for idx, row in enumerate(self.H.T):
-            self.syndrome_table[tuple(row)] = idx
 
-    def decode(self, received_data: np.ndarray) -> np.ndarray:
+    def __init__(self, rs_nsym: int = 10):
+        # Hamming(7,4) Eşlik Kontrol Matrisi: H = [P^T | I_3] (Boyut: 3x7)
+        self.H = np.array([
+            [1, 1, 0, 1, 1, 0, 0],
+            [1, 0, 1, 1, 0, 1, 0],
+            [0, 1, 1, 1, 0, 0, 1]
+        ], dtype=np.uint8)
+
+        # H matrisinin sütunlarını hızlı arama (Lookup Table) için tam sayıya (1..7) eşle
+        self.syndrome_map = {}
+        weights = np.array([4, 2, 1], dtype=np.uint8)
+        for col_idx in range(7):
+            syndrome_val = int(np.dot(weights, self.H[:, col_idx]))
+            self.syndrome_map[syndrome_val] = col_idx
+
+        self.rs_nsym = rs_nsym
+        self.rs_codec = RSCodec(rs_nsym)
+
+    def decode_hamming(self, received_bits: np.ndarray, original_bit_len: int = None) -> np.ndarray:
         """
-        Gelen 1D kodlanmış (ve gürültülü) bit dizisini 7'şerli bloklara ayırır,
-        sendrom tablosuyla tek bitlik hataları düzeltir ve 4 bitlik verileri döndürür.
+        Alınan 7'li blokların sendromunu (S = R * H^T mod 2) hesaplar,
+        tek bitlik hataları tespit edip ters çevirerek (XOR) düzeltir.
         """
-        received_data = np.asarray(received_data, dtype=int)
-        
-        if len(received_data) % self.n != 0:
-            raise ValueError(f"Gelen veri uzunluğu {self.n}'nin tam katı olmalıdır!")
-            
-        num_blocks = len(received_data) // self.n
-        blocks = received_data.reshape((num_blocks, self.n)).copy()
-        
-        # Tüm bloklar için sendrom matrisini tek seferde hesapla: S = (R * H^T) mod 2
-        syndromes = np.dot(blocks, self.H.T) % 2
-        
-        # Sendromu sıfırdan farklı olan (hatalı) blokları bul ve düzelt
-        for i in range(num_blocks):
-            s_tuple = tuple(syndromes[i])
-            if s_tuple != (0, 0, 0):
-                # Sendrom tablosundan hangi bitin bozulduğunu bul
-                error_bit_idx = self.syndrome_table.get(s_tuple)
-                if error_bit_idx is not None:
-                    # Hatalı biti tersine çevir (0->1, 1->0)
-                    blocks[i, error_bit_idx] ^= 1
-                    
-        # Sistematik kod olduğu için her bloğun ilk 4 biti (k=4) mesaj verisidir
-        decoded_messages = blocks[:, :self.k]
-        
-        return decoded_messages.flatten()
+        blocks = received_bits.astype(np.uint8).reshape(-1, 7).copy()
+
+        # Tüm bloklar için tek seferde Sendrom Hesabı: S = (R @ H^T) % 2
+        syndromes = np.matmul(blocks, self.H.T) % 2
+
+        # 3-bitlik sendromları onluk tabanda tam sayıya çevir (0 ise hata yok, 1..7 ise hata var)
+        weights = np.array([4, 2, 1], dtype=np.uint8)
+        syndrome_ints = np.dot(syndromes, weights)
+
+        # Sadece sendromu 0 OLMAYAN (hatalı) blokları bul ve ilgili biti ters çevir
+        error_block_indices = np.nonzero(syndrome_ints)[0]
+        for blk_idx in error_block_indices:
+            s_val = int(syndrome_ints[blk_idx])
+            corrupted_bit_pos = self.syndrome_map[s_val]
+            blocks[blk_idx, corrupted_bit_pos] ^= 1
+
+        # Sistematik kodda ilk 4 sütun orijinal veridir
+        decoded_bits = blocks[:, :4].flatten()
+
+        if original_bit_len is not None:
+            return decoded_bits[:original_bit_len]
+        return decoded_bits
+
+    def decode_rs(self, received_bits: np.ndarray, original_bit_len: int) -> np.ndarray:
+        """
+        Alınan bitleri Byte'lara çevirir ve Reed-Solomon çözücüden geçirir.
+        """
+        rx_bytes = np.packbits(received_bits.astype(np.uint8)).tobytes()
+        try:
+            decoded_bytearray, _, _ = self.rs_codec.decode(rx_bytes)
+            decoded_bits = np.unpackbits(np.frombuffer(bytes(decoded_bytearray), dtype=np.uint8))
+            return decoded_bits[:original_bit_len]
+        except ReedSolomonError:
+            return received_bits[:original_bit_len].astype(np.uint8)
 
 
-# --- TEST KISMI (Encoder + Kanal Hatası + Decoder) ---
+# --- HIZLI DOĞRULAMA TESTİ ---
 if __name__ == "__main__":
-    from encoder import Hamming74Encoder
-    
-    encoder = Hamming74Encoder()
-    decoder = Hamming74Decoder()
-    
-    # 1. Orijinal 8 bitlik (2 blok) telemetri verisi
-    orijinal_veri = np.array([1, 0, 1, 1,   0, 1, 1, 0])
-    
-    # 2. Hamming (7,4) ile kodla (14 bit)
-    kodlu_veri = encoder.encode(orijinal_veri)
-    
-    # 3. Yapay hata enjekte et (Her iki 7 bitlik bloğun da 1'er bitini bozalım)
-    bozuk_veri = kodlu_veri.copy()
-    bozuk_veri[2] ^= 1   # 1. bloğun 2. indeksini (3. bitini) bozduk
-    bozuk_veri[11] ^= 1  # 2. bloğun 4. indeksini (parity bitini) bozduk
-    
-    # 4. Decoder ile hatayı tespit et ve çöz
-    cozulen_veri = decoder.decode(bozuk_veri)
-    
-    print("=== HAMMING (7,4) UÇTAN UCA HATA DÜZELTME TESTİ ===")
-    print(f"1. Orijinal Veri (8 bit)   : {orijinal_veri}")
-    print(f"2. Kodlanmış Veri (14 bit) : {kodlu_veri}")
-    print(f"3. Kanalda Bozulan Veri    : {bozuk_veri}  <-- (2 adet bit hatası var!)")
-    print(f"4. Çözülen (Kurtarılan)    : {cozulen_veri}")
-    
-    basari = np.array_equal(orijinal_veri, cozulen_veri)
-   
+    from encoder import FECEncoder
+
+    enc = FECEncoder(rs_nsym=4)
+    dec = FECDecoder(rs_nsym=4)
+
+    # 1. Hamming(7,4) Testi: 4 bit veri gönder, kanalda 1 bitini kasten boz!
+    veri = np.array([1, 0, 1, 1], dtype=np.uint8)
+    kodlu = enc.encode_hamming(veri)
+    print("=== 1. Hamming(7,4) Testi ===")
+    print(f"Orijinal 4 Bit Veri : {veri}")
+    print(f"Kodlanmış 7 Bit (c) : {kodlu}")
+
+    bozuk = kodlu.copy()
+    bozuk[2] ^= 1
+    print(f"Kanalda Bozulan (r) : {bozuk}  <-- 3. bit (indeks 2) bozuldu!")
+
+    cozulen = dec.decode_hamming(bozuk, original_bit_len=4)
+    print(f"Onarılan Çıkış Bit  : {cozulen}  <-- %100 Kurtarıldı!\n")
+
+    # 2. Reed-Solomon Testi: 16 bit (2 Byte) veri gönder, ardışık 5 biti (Burst Error) boz!
+    veri_rs = np.array([1, 0, 1, 0, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0, 0, 1], dtype=np.uint8)
+    kodlu

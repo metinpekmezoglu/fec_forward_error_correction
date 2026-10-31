@@ -1,78 +1,75 @@
 import numpy as np
+from reedsolo import RSCodec
 
-class Hamming74Encoder:
+class FECEncoder:
     """
-    Sistematik Hamming (7,4) Blok Kodlayıcı.
-    4 bitlik mesaj vektörlerini (d), 7 bitlik kod kelimelerine (c) dönüştürür.
-    Kod Oranı (Code Rate): R = k / n = 4 / 7 (~0.571)
+    İHA ve Model Uydu Telemetri Sistemi için İleri Hata Düzeltme (FEC) Kodlayıcı.
+    - Bit seviyesinde Hamming(7,4) blok kodlama (Matris tabanlı)
+    - Byte/Sembol seviyesinde Reed-Solomon kodlama içerir.
     """
-    def __init__(self):
-        self.n = 7  # Kod kelimesi uzunluğu
-        self.k = 4  # Mesaj biti uzunluğu
-        
-        # Parity (Eşlik) Alt Matrisi P (4x3)
-        self.P = np.array([
-            [1, 1, 0],
-            [1, 0, 1],
-            [0, 1, 1],
-            [1, 1, 1]
-        ], dtype=int)
-        
-        # Birim Matrisler
-        self.I_k = np.eye(self.k, dtype=int)          # 4x4 Birim Matris
-        self.I_nk = np.eye(self.n - self.k, dtype=int) # 3x3 Birim Matris
-        
-        # Sistematik Üreteç Matrisi: G = [I_4 | P] (4x7)
-        self.G = np.hstack((self.I_k, self.P))
-        
-        # Eşlik Denetim Matrisi: H = [P^T | I_3] (3x7) -> Decoder için referans
-        self.H = np.hstack((self.P.T, self.I_nk))
 
-    def encode(self, data: np.ndarray) -> np.ndarray:
+    def __init__(self, rs_nsym: int = 10):
         """
-        Gelen 1D bit dizisini 4'erli bloklara ayırır ve G matrisi ile çarpar.
-        Eğer veri uzunluğu 4'ün tam katı değilse sonuna sıfır ekler (zero-padding).
+        Parametreler:
+            rs_nsym (int): Reed-Solomon için eklenecek hata düzeltme sembol (byte) sayısı.
+                           Varsayılan 10 byte (nsym/2 = 5 byte'a kadar ardışık hatayı düzeltir).
         """
-        data = np.asarray(data, dtype=int)
+        # Hamming(7,4) Sistematik Üreteç Matrisi: G = [I_4 | P] (Boyut: 4x7)
+        self.G = np.array([
+            [1, 0, 0, 0, 1, 1, 0],
+            [0, 1, 0, 0, 1, 0, 1],
+            [0, 0, 1, 0, 0, 1, 1],
+            [0, 0, 0, 1, 1, 1, 1]
+        ], dtype=np.uint8)
+
+        self.rs_nsym = rs_nsym
+        self.rs_codec = RSCodec(rs_nsym)
+
+    def encode_hamming(self, bits: np.ndarray) -> np.ndarray:
+        """
+        Giriş bit dizisini 4'lü bloklara ayırır ve G matrisi ile çarparak
+        7'li Hamming kod kelimelerine dönüştürür.
+
+        Parametreler:
+            bits (np.ndarray): Kodlanacak 0 ve 1'lerden oluşan 1 boyutlu dizi.
+
+        Dönüş:
+            np.ndarray: Hamming(7,4) ile kodlanmış bit dizisi.
+        """
+        bits = bits.astype(np.uint8)
         
-        # Uzunluk 4'ün katı değilse eksik kalan kısmı 0 ile tamamla
-        remainder = len(data) % self.k
+        # 1. Padding (Dolgu): Bit sayısı 4'ün tam katı değilse sonuna 0 ekle
+        remainder = len(bits) % 4
         if remainder != 0:
-            pad_len = self.k - remainder
-            data = np.pad(data, (0, pad_len), 'constant', constant_values=0)
-            
-        # Veriyi (N, 4) boyutunda matrise dönüştür
-        num_blocks = len(data) // self.k
-        data_blocks = data.reshape((num_blocks, self.k))
-        
-        # Matris çarpımı ve Mod 2 (GF(2) aritmetiği / XOR eşdeğeri)
-        encoded_blocks = np.dot(data_blocks, self.G) % 2
-        
-        # Tekrar 1D dizi (vektör) haline getirip döndür
-        return encoded_blocks.flatten()
+            pad_len = 4 - remainder
+            bits = np.append(bits, np.zeros(pad_len, dtype=np.uint8))
 
+        # 2. Vektörü (N, 4) boyutunda matrise dönüştür (Her satır 4 bitlik bir veri bloğu)
+        data_blocks = bits.reshape(-1, 4)
 
-# --- TEST KISMI ---
-if __name__ == "__main__":
-    encoder = Hamming74Encoder()
-    
-    print("=== 1. Üreteç Matrisi (G) [4x7] ===")
-    print(encoder.G)
-    
-    print("\n=== 2. Eşlik Denetim Matrisi (H) [3x7] ===")
-    print(encoder.H)
-    
-    # Doğrulama: G * H^T (Mod 2) her zaman sıfır matrisi olmalıdır!
-    orthogonality_check = np.dot(encoder.G, encoder.H.T) % 2
-    print("\n=== 3. Diklik Kontrolü (G * H^T mod 2 == 0) ===")
-    print(orthogonality_check)
-    
-    # Örnek 8 bitlik (2 blok) veri kodlama testi
-    ornek_veri = np.array([1, 0, 1, 1,   0, 1, 1, 0])
-    kodlanmis_veri = encoder.encode(ornek_veri)
-    
-    print("\n=== 4. Kodlama Testi ===")
-    print(f"Giriş Verisi (8 bit)     : {ornek_veri}")
-    print(f"Kodlanmış Çıkış (14 bit) : {kodlanmis_veri}")
-    print(f"1. Blok: {ornek_veri[:4]} -> {kodlanmis_veri[:7]} (İlk 4 bit veri, son 3 bit parity)")
-    print(f"2. Blok: {ornek_veri[4:]} -> {kodlanmis_veri[7:]}")
+        # 3. Galois Alanı GF(2) Matris Çarpımı: C = (D @ G) % 2
+        encoded_blocks = np.matmul(data_blocks, self.G) % 2
+
+        # 4. Matrisi tekrar 1 boyutlu bit akışına (stream) düzleştir
+        return encoded_blocks.flatten().astype(np.uint8)
+
+    def encode_rs(self, bits: np.ndarray) -> np.ndarray:
+        """
+        Bit dizisini Byte'lara paketler, Reed-Solomon eşlik byte'larını ekler
+        ve kanala gönderilmek üzere tekrar bit dizisine (uint8) dönüştürür.
+
+        Parametreler:
+            bits (np.ndarray): Kodlanacak bit dizisi (8'in katı uzunlukta).
+
+        Dönüş:
+            np.ndarray: Reed-Solomon ile kodlanmış bit dizisi.
+        """
+        # 1. Bitleri Byte dizisine çevir (Örn: 112 bit -> 14 Byte)
+        raw_bytes = np.packbits(bits.astype(np.uint8)).tobytes()
+
+        # 2. Reed-Solomon Kodlaması (14 Byte veri + 10 Byte Parity = 24 Byte)
+        encoded_bytearray = self.rs_codec.encode(raw_bytes)
+
+        # 3. Kodlanmış Byte'ları kanala basmak için tekrar 0 ve 1 bitlerine aç (192 bit)
+        encoded_bits = np.unpackbits(np.frombuffer(bytes(encoded_bytearray), dtype=np.uint8))
+        return encoded_bits
